@@ -21,6 +21,12 @@ python -m src.run_pipeline --simulate-failure  # or SIMULATE_FAILURE=1
 streamlit run dashboard/app.py
 ```
 
+Restart Streamlit after changing anything in `src/`. Streamlit only reloads files in `dashboard/`, so a running
+server keeps the old `src` modules, and new attributes (e.g. `tools.EVENTS`) show up as AttributeError.
+
+Live panel: `run_agent()` runs in a background thread started by the dashboard, which polls `tools.EVENTS`
+every second. `tools.STOP_REQUESTED` is the Stop button's flag, checked in `agent.py` routing and the tool node.
+
 Hosted on Streamlit Community Cloud: secrets come from `st.secrets` (copied into env vars at the top of
 `dashboard/app.py`), and `data/books.db` is committed as a snapshot. `run_agent()` holds a lock, so only one run
 happens at a time.
@@ -34,7 +40,7 @@ Run modules from the project root (`python -m src....`), not as files. `src` is 
 - `src/db.py`: `SCHEMA` string plus helpers. `connect()` reads `config.DB_PATH` at call time, so tests can
   monkeypatch it.
 - `src/tools.py`: pure parsers (`parse_price`, `parse_rating`, `parse_stock`, `parse_listing`, `parse_product`),
-  `fetch()` (politeness delay and failure injection), the module-level `STATE` (`RunState`), and the 9 tools.
+  `fetch()` (politeness delay and failure injection), the module-level `STATE` (`RunState`), and the 10 tools.
   `TOOLS` / `TOOLS_BY_NAME` sit at the bottom.
 - `src/agent.py`: `SYSTEM_PROMPT`, `get_llm()` (Gemini, rate-limited for the free tier), `build_graph(llm=None)` (an LLM can be injected for offline testing),
   `run_agent()`.

@@ -63,7 +63,8 @@ Things to know when hosted:
 - **Shipped snapshot:** `data/books.db` is committed, so the dashboard shows data before anyone clicks Run.
 - **Temporary storage:** the cloud filesystem resets when the app restarts or redeploys, so the dashboard
   goes back to the committed snapshot.
-- **One run at a time:** if two visitors click **Run Pipeline**, the second gets "already in progress".
+- **One run at a time:** while a run is going, **Run pipeline** is disabled. Anyone who opens the page sees
+  the live activity panel, and anyone can press **Stop run**.
 - **Shared quota:** the Gemini free tier allows about 5 requests/min and 20 requests/day *per model*. A run needs
   about 7–10 requests, so one model covers about 2 runs a day. The fallback chain (4 models) raises that to about 8.
   Anyone with the URL can click Run, so keep the app private (Streamlit lets you restrict viewers) if
@@ -96,7 +97,7 @@ Things to know when hosted:
 |---|---|
 | `src/config.py` | Settings from `.env`: model, paths, delays, retry and recursion limits |
 | `src/db.py` | Schema and small SQLite helpers |
-| `src/tools.py` | Parsers, polite HTTP fetch, failure injection, the 9 `@tool`s, logging |
+| `src/tools.py` | Parsers, polite HTTP fetch, failure injection, the 10 `@tool`s, live event feed, stop flag, logging |
 | `src/agent.py` | System prompt, LangGraph graph, `run_agent()` |
 | `src/run_pipeline.py` | CLI entrypoint |
 | `dashboard/app.py` | Streamlit dashboard |
@@ -105,6 +106,19 @@ Things to know when hosted:
 | `CLAUDE.md` | Conventions and rules for AI coding assistants working in this repo |
 
 ## Design decisions
+
+- **Live activity panel.** When you click **Run pipeline**, the agent runs in a background thread, and the page
+  redraws every second from an in-memory event feed (`tools.EVENTS`). The panel shows a step tracker
+  (listing pages → product pages → validate → save → summary), a progress bar, a plain-English feed with
+  failures, retries and recoveries pinned, and the raw console output.
+- **Stop button.** **Stop run** sets a flag (`tools.STOP_REQUESTED`). The agent checks it before every model
+  call and tool call, so the run ends after the current step. A model call that's already in flight can't be
+  cut off, so this can take a few seconds. Data already saved stays valid.
+- **Extra batch tool (10th tool).** Besides the spec's `scrape_product_page(product_url)`, there is
+  `scrape_product_pages(product_urls)`, which fetches many product pages in one tool call. Smaller free-tier
+  models (the "lite" fallbacks) don't reliably put many tool calls in one turn. Without the batch tool they made
+  one model call per book (60+ calls), which blew through the free quota. The agent still decides when and
+  how to call it.
 
 - **Custom tool node, not the prebuilt `ToolNode`.** Tools run one after another, so the 0.3 s politeness delay
   really holds and SQLite is only touched from one thread. The agent can still ask for many product pages in one turn,

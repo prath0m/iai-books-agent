@@ -5,6 +5,7 @@ Each tool call is logged (console + agent_logs table) by the @logged decorator.
 import functools
 import json
 import re
+import threading
 import time
 from dataclasses import dataclass, field
 from urllib.parse import urljoin, urlparse
@@ -36,21 +37,66 @@ class RunState:
 
 STATE = RunState()
 
+# Live feed of the current run (read by the dashboard while the agent works).
+# Each item: {"time", "source", "status", "text", "console"}; "text" is a short plain-English line.
+EVENTS: list[dict] = []
+
+# Set by the dashboard's Stop button; the agent checks it before every model call and tool call
+STOP_REQUESTED = threading.Event()
+
 
 def start_run(run_id: str, simulate_failure: bool = False) -> None:
     """Reset state for a new run and make sure the DB schema exists."""
     global STATE
     STATE = RunState(run_id=run_id, simulate_failure=simulate_failure)
+    EVENTS.clear()
+    STOP_REQUESTED.clear()
     db.init_db()
 
 
-def log_event(tool_name: str, status: str, details: str) -> None:
-    """Write one log line to the console and to agent_logs."""
-    print(f"[{db.now_iso()}] {tool_name:<20} {status:<16} {details}", flush=True)
+def emit(source: str, status: str, text: str, console: str) -> None:
+    """Print a console line and add it to the live feed."""
+    print(console, flush=True)
+    EVENTS.append({"time": db.now_iso()[11:19], "source": source, "status": status, "text": text, "console": console})
+
+
+def log_event(tool_name: str, status: str, details: str, text: str | None = None) -> None:
+    """Write one log line to the console, the live feed and agent_logs."""
+    emit(tool_name, status, text or details, f"[{db.now_iso()}] {tool_name:<20} {status:<16} {details}")
     try:
         db.insert_log(STATE.run_id, tool_name, status, details)
     except Exception as exc:  # logging must never break the pipeline
         print(f"  (could not write log to DB: {exc})")
+
+
+def describe(tool_name: str, args: dict, result: dict) -> str:
+    """One readable sentence about a tool call, for the live feed."""
+    if not result.get("ok"):
+        return f"{tool_name} failed: {result.get('error', 'unknown error')}"
+    if tool_name == "scrape_listing_page":
+        return f"Listing page {result['page']}: found {result['books_found']} books"
+    if tool_name == "scrape_product_page":
+        slug = result["product_url"].rstrip("/").split("/")[-2].rsplit("_", 1)[0].replace("-", " ")
+        return f"Product '{slug[:45]}': {result['category']}, {result['stock']}"
+    if tool_name == "scrape_product_pages":
+        return f"Batch done: {result['fetched']} product pages fetched"
+    if tool_name == "get_status":
+        return (f"Status check: pages done {result['pages_done']}, "
+                f"{result['books_missing_category_or_stock']} books missing details, "
+                f"{len(result['failed_urls'])} failed URLs")
+    if tool_name == "retry_failed":
+        return f"Retry succeeded on attempt {result['attempt']} using {result['strategy']}"
+    if tool_name == "validate_data":
+        return f"Validation: {result['total_issues']} issues in {result['report']['rows_checked']} rows"
+    if tool_name == "save_clean_data":
+        return f"Saved {result['rows_upserted']} rows to Silver ({result['silver_row_count']} in total), Gold rebuilt"
+    if tool_name == "get_facts":
+        return f"Facts: {result['total_books']} books, average price £{result['average_price_gbp']}"
+    if tool_name == "save_summary":
+        return "AI summary saved"
+    if tool_name == "finish":
+        return f"Finished: {result['reason']}"
+    return f"{tool_name} done"
 
 
 def logged(func):
@@ -65,7 +111,8 @@ def logged(func):
         short = json.dumps(result, default=str)
         short = short if len(short) <= 300 else short[:300] + "..."
         reason = f" | reason: {STATE.current_reason}" if STATE.current_reason else ""
-        log_event(func.__name__, status, f"args={json.dumps(kwargs, default=str)} result={short}{reason}")
+        log_event(func.__name__, status, f"args={json.dumps(kwargs, default=str)} result={short}{reason}",
+                  text=describe(func.__name__, kwargs, result))
         return result
     return wrapper
 
@@ -208,6 +255,24 @@ def scrape_product_page(product_url: str) -> dict:
         STATE.failed[product_url] = result["error"]
         return {"ok": False, "product_url": product_url, "error": result["error"]}
     return _ingest_product(product_url, result["html"])
+
+
+@tool
+@logged
+def scrape_product_pages(product_urls: list[str]) -> dict:
+    """Fetch several product pages in one call (e.g. all 20 URLs from one listing page).
+    Same as calling scrape_product_page for each URL; failed URLs are listed so you can retry them."""
+    fetched, failed = 0, []
+    for url in product_urls:
+        if STOP_REQUESTED.is_set():
+            break
+        result = scrape_product_page.invoke({"product_url": url})  # logged per URL
+        if result["ok"]:
+            fetched += 1
+        else:
+            failed.append({"url": url, "error": result.get("error")})
+    return {"ok": not failed, "fetched": fetched, "failed": failed,
+            **({"error": f"{len(failed)} product pages failed"} if failed else {})}
 
 
 @tool
@@ -421,6 +486,6 @@ def finish(reason: str) -> dict:
     return {"ok": True, "finished": True, "reason": reason}
 
 
-TOOLS = [scrape_listing_page, scrape_product_page, get_status, retry_failed, validate_data,
+TOOLS = [scrape_listing_page, scrape_product_page, scrape_product_pages, get_status, retry_failed, validate_data,
          save_clean_data, get_facts, save_summary, finish]
 TOOLS_BY_NAME = {t.name: t for t in TOOLS}

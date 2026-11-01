@@ -85,3 +85,21 @@ def test_only_one_run_at_a_time():
     with agent._RUN_LOCK:
         result = agent.run_agent()
     assert result["run_id"] is None and result["finished"] is False
+
+
+def test_stop_button_ends_run(temp_db):
+    # A stop request ends the graph before any tool runs; the run reports it was stopped
+    from langchain_core.language_models.fake_chat_models import FakeMessagesListChatModel
+    from langchain_core.messages import AIMessage
+    from src import agent
+
+    class FakeLLM(FakeMessagesListChatModel):
+        def bind_tools(self, *args, **kwargs):
+            tools.STOP_REQUESTED.set()  # simulate the user pressing Stop while the model is thinking
+            return self
+
+    call = {"name": "scrape_listing_page", "args": {"page_number": 1}, "id": "1", "type": "tool_call"}
+    llm = FakeLLM(responses=[AIMessage(content="Scrape page 1.", tool_calls=[call])])
+    result = agent.run_agent(llm=llm)
+    assert result["finished"] is False and result["reason"] == "stopped by user"
+    assert tools.STATE.pages_done == set()  # nothing was scraped after the stop
