@@ -3,9 +3,9 @@ import json
 import uuid
 from typing import Annotated, TypedDict
 
-from langchain_anthropic import ChatAnthropic
 from langchain_core.messages import AIMessage, HumanMessage, SystemMessage, ToolMessage
 from langchain_core.rate_limiters import InMemoryRateLimiter
+from langchain_google_genai import ChatGoogleGenerativeAI
 from langgraph.errors import GraphRecursionError
 from langgraph.graph import END, START, StateGraph
 from langgraph.graph.message import add_messages
@@ -43,7 +43,7 @@ class AgentState(TypedDict):
 
 
 def _text_of(message: AIMessage) -> str:
-    """Plain text of an AI message (Anthropic returns a list of content blocks)."""
+    """Plain text of an AI message (Gemini may return a list of content blocks)."""
     if isinstance(message.content, str):
         return message.content.strip()
     parts = [b.get("text", "") for b in message.content if isinstance(b, dict) and b.get("type") == "text"]
@@ -51,15 +51,12 @@ def _text_of(message: AIMessage) -> str:
 
 
 def get_llm():
-    """Chat model for the configured provider (LLM_PROVIDER in .env)."""
-    if config.LLM_PROVIDER == "google":
-        from langchain_google_genai import ChatGoogleGenerativeAI  # imported lazily: optional provider
-        # Free tier allows only a few requests per minute, so pace calls instead of failing with 429
-        limiter = InMemoryRateLimiter(requests_per_second=config.GOOGLE_REQUESTS_PER_MINUTE / 60,
-                                      check_every_n_seconds=0.5, max_bucket_size=1)
-        return ChatGoogleGenerativeAI(model=config.MODEL, temperature=0, max_tokens=4096,
-                                      timeout=60, max_retries=3, rate_limiter=limiter)
-    return ChatAnthropic(model=config.MODEL, temperature=0, max_tokens=4096)
+    """Gemini chat model. The free tier allows only a few requests per minute, so calls are paced
+    instead of failing with HTTP 429."""
+    limiter = InMemoryRateLimiter(requests_per_second=config.GOOGLE_REQUESTS_PER_MINUTE / 60,
+                                  check_every_n_seconds=0.5, max_bucket_size=1)
+    return ChatGoogleGenerativeAI(model=config.MODEL, temperature=0, max_tokens=4096,
+                                  timeout=60, max_retries=3, rate_limiter=limiter)
 
 
 def build_graph(llm=None):
@@ -111,7 +108,7 @@ def run_agent(simulate_failure: bool = False, llm=None) -> dict:
     """Run one full pipeline. Returns {"run_id", "finished", "reason"}. Never raises on agent errors."""
     run_id = f"run_{tools.db.now_iso().replace(':', '').replace('-', '')[:15]}_{uuid.uuid4().hex[:6]}"
     tools.start_run(run_id, simulate_failure=simulate_failure)
-    tools.log_event("pipeline", "START", f"run_id={run_id} provider={config.LLM_PROVIDER} model={config.MODEL} simulate_failure={simulate_failure}")
+    tools.log_event("pipeline", "START", f"run_id={run_id} model={config.MODEL} simulate_failure={simulate_failure}")
 
     graph = build_graph(llm)
     try:

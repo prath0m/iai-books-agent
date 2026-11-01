@@ -1,6 +1,6 @@
 # iai-books-agent
 
-A small **agentic** data pipeline: a LangGraph + Claude agent scrapes the first 3 catalogue pages (60 books)
+A small **agentic** data pipeline: a LangGraph + Google Gemini agent scrapes the first 3 catalogue pages (60 books)
 of [books.toscrape.com](https://books.toscrape.com/), stores them in a SQLite **Bronze → Silver → Gold** model,
 writes a fact-grounded summary, and a Streamlit dashboard shows the results and the agent's decisions.
 
@@ -14,17 +14,14 @@ cd iai-books-agent
 python3 -m venv .venv
 source .venv/bin/activate          # Windows: .venv\Scripts\activate
 pip install -r requirements.txt
-cp .env.example .env               # then edit .env: pick LLM_PROVIDER and set its API key
+cp .env.example .env               # then edit .env and set GOOGLE_API_KEY
 ```
 
 `.env` settings:
 
 | Variable | Default | Meaning |
 |---|---|---|
-| `LLM_PROVIDER` | `anthropic` | `anthropic` or `google` (Gemini, has a free tier) |
-| `ANTHROPIC_API_KEY` | (if provider is anthropic) | Anthropic API key (needs paid API credits) |
-| `ANTHROPIC_MODEL` | `claude-sonnet-4-6` | Claude model used by the agent |
-| `GOOGLE_API_KEY` | (if provider is google) | Gemini key from [aistudio.google.com/apikey](https://aistudio.google.com/apikey) |
+| `GOOGLE_API_KEY` | (required) | Gemini key from [aistudio.google.com/apikey](https://aistudio.google.com/apikey) |
 | `GOOGLE_MODEL` | `gemini-3.5-flash` | Gemini model used by the agent |
 | `GOOGLE_REQUESTS_PER_MINUTE` | `4` | Client-side pacing; the Gemini free tier allows 5 requests/min, so a run takes ~4-5 min |
 | `SIMULATE_FAILURE` | `0` | `1` = fail the first request to page 2 once |
@@ -56,7 +53,7 @@ retry_failed         RECOVERED        .../page-2.html recovered on attempt 1 usi
 ```
                  ┌─────────────────────── LangGraph ───────────────────────┐
   run_pipeline / │                                                          │
-  dashboard ───▶ │  START ─▶ agent (Claude + system prompt) ──tool calls──▶ tools node
+  dashboard ───▶ │  START ─▶ agent (Gemini + system prompt) ──tool calls──▶ tools node
                  │              ▲            │ no tool calls                 │ (runs tools one by one,
                  │              │            ▼                               │  logs each call)
                  │              └──────── END ◀── finish() called ──────────┘
@@ -103,9 +100,10 @@ retry_failed         RECOVERED        .../page-2.html recovered on attempt 1 usi
   happens on the way to Silver, so a parser change can be replayed from Bronze.
 - **Silver is idempotent.** It has `PRIMARY KEY(product_url)` and is written with `INSERT ... ON CONFLICT DO UPDATE`,
   so reruns update rows instead of adding new ones. Gold is fully rebuilt from Silver on each save.
-- **Swappable LLM.** `get_llm()` in `src/agent.py` returns Claude or Gemini depending on `LLM_PROVIDER`.
-  Tools, graph and dashboard are provider-agnostic. Claude stays the default, as the spec requires; Gemini is
-  there as a free alternative.
+- **Gemini instead of Claude.** The spec asked for `langchain-anthropic`, but the project uses Google Gemini
+  (`langchain-google-genai`) because it has a free tier. Only `get_llm()` in `src/agent.py` knows about the provider,
+  so switching back means changing that one function. Calls are paced to stay under the free tier's
+  5 requests/minute.
 - **Grounded summary.** `get_facts` reads only from Gold, and the prompt says the summary may use only those numbers.
 
 ## Assumptions and simplifications
