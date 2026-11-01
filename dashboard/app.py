@@ -28,7 +28,7 @@ def read_sql(sql: str) -> pd.DataFrame:
 
 
 st.title("📚 Agentic Books Pipeline")
-st.caption(f"Source: books.toscrape.com (pages {config.PAGES_TO_SCRAPE}) · Model: {config.MODEL} · DB: {config.DB_PATH.name}")
+st.caption(f"Source: books.toscrape.com (pages {config.PAGES_TO_SCRAPE}) · Model: {config.LLM_PROVIDER} / {config.MODEL} · DB: {config.DB_PATH.name}")
 
 # --- Run controls -------------------------------------------------------------
 col_btn, col_chk, _ = st.columns([1, 1, 3])
@@ -36,8 +36,9 @@ simulate = col_chk.checkbox("Simulate failure", value=config.simulate_failure_fr
                             help="First request to page 2 fails once with a simulated HTTP 503")
 if col_btn.button("▶ Run Pipeline", type="primary"):
     import os
-    if not os.getenv("ANTHROPIC_API_KEY"):
-        st.error("ANTHROPIC_API_KEY is not set. Copy .env.example to .env and add your key.")
+    if not os.getenv(config.API_KEY_VAR):
+        st.error(f"{config.API_KEY_VAR} is not set (LLM_PROVIDER={config.LLM_PROVIDER}). "
+                 "Copy .env.example to .env and add your key.")
     else:
         from src.agent import run_agent
         with st.spinner("Agent is running (scraping 60 books politely takes ~1-2 minutes)..."):

@@ -13,8 +13,9 @@ def main() -> int:
                         help="fail the first request to page 2 once (also: SIMULATE_FAILURE=1)")
     args = parser.parse_args()
 
-    if not os.getenv("ANTHROPIC_API_KEY"):
-        print("ANTHROPIC_API_KEY is not set. Copy .env.example to .env and add your key.")
+    if not os.getenv(config.API_KEY_VAR):
+        print(f"{config.API_KEY_VAR} is not set (LLM_PROVIDER={config.LLM_PROVIDER}). "
+              "Copy .env.example to .env and add your key.")
         return 1
 
     simulate = args.simulate_failure or config.simulate_failure_from_env()

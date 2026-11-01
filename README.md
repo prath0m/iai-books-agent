@@ -14,15 +14,18 @@ cd iai-books-agent
 python3 -m venv .venv
 source .venv/bin/activate          # Windows: .venv\Scripts\activate
 pip install -r requirements.txt
-cp .env.example .env               # then edit .env and set ANTHROPIC_API_KEY
+cp .env.example .env               # then edit .env: pick LLM_PROVIDER and set its API key
 ```
 
 `.env` settings:
 
 | Variable | Default | Meaning |
 |---|---|---|
-| `ANTHROPIC_API_KEY` | (required) | Your Anthropic API key |
-| `ANTHROPIC_MODEL` | `claude-sonnet-4-6` | Model used by the agent |
+| `LLM_PROVIDER` | `anthropic` | `anthropic` or `google` (Gemini, has a free tier) |
+| `ANTHROPIC_API_KEY` | (if provider is anthropic) | Anthropic API key (needs paid API credits) |
+| `ANTHROPIC_MODEL` | `claude-sonnet-4-6` | Claude model used by the agent |
+| `GOOGLE_API_KEY` | (if provider is google) | Gemini key from [aistudio.google.com/apikey](https://aistudio.google.com/apikey) |
+| `GOOGLE_MODEL` | `gemini-3.8-flash` | Gemini model used by the agent |
 | `SIMULATE_FAILURE` | `0` | `1` = fail the first request to page 2 once |
 
 ## How to run
@@ -99,6 +102,9 @@ retry_failed         RECOVERED        .../page-2.html recovered on attempt 1 usi
   happens on the way to Silver, so a parser change can be replayed from Bronze.
 - **Silver is idempotent.** It has `PRIMARY KEY(product_url)` and is written with `INSERT ... ON CONFLICT DO UPDATE`,
   so reruns update rows instead of adding new ones. Gold is fully rebuilt from Silver on each save.
+- **Swappable LLM.** `get_llm()` in `src/agent.py` returns Claude or Gemini depending on `LLM_PROVIDER`.
+  Tools, graph and dashboard are provider-agnostic. Claude stays the default, as the spec requires; Gemini is
+  there as a free alternative.
 - **Grounded summary.** `get_facts` reads only from Gold, and the prompt says the summary may use only those numbers.
 
 ## Assumptions and simplifications

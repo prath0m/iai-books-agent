@@ -48,10 +48,18 @@ def _text_of(message: AIMessage) -> str:
     return " ".join(p.strip() for p in parts if p.strip())
 
 
+def get_llm():
+    """Chat model for the configured provider (LLM_PROVIDER in .env)."""
+    if config.LLM_PROVIDER == "google":
+        from langchain_google_genai import ChatGoogleGenerativeAI  # imported lazily: optional provider
+        return ChatGoogleGenerativeAI(model=config.MODEL, temperature=0, max_tokens=4096)
+    return ChatAnthropic(model=config.MODEL, temperature=0, max_tokens=4096)
+
+
 def build_graph(llm=None):
     """Graph: START -> agent -> (tools -> agent)* -> END. `llm` can be injected for testing."""
     if llm is None:
-        llm = ChatAnthropic(model=config.MODEL, temperature=0, max_tokens=4096)
+        llm = get_llm()
     llm_with_tools = llm.bind_tools(tools.TOOLS)
 
     def agent_node(state: AgentState):
@@ -97,7 +105,7 @@ def run_agent(simulate_failure: bool = False, llm=None) -> dict:
     """Run one full pipeline. Returns {"run_id", "finished", "reason"}. Never raises on agent errors."""
     run_id = f"run_{tools.db.now_iso().replace(':', '').replace('-', '')[:15]}_{uuid.uuid4().hex[:6]}"
     tools.start_run(run_id, simulate_failure=simulate_failure)
-    tools.log_event("pipeline", "START", f"run_id={run_id} model={config.MODEL} simulate_failure={simulate_failure}")
+    tools.log_event("pipeline", "START", f"run_id={run_id} provider={config.LLM_PROVIDER} model={config.MODEL} simulate_failure={simulate_failure}")
 
     graph = build_graph(llm)
     try:

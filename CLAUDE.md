@@ -16,7 +16,7 @@ Always use the project venv (`.venv/`).
 source .venv/bin/activate
 pip install -r requirements.txt
 pytest                                         # offline, ~1s, no API key needed
-python -m src.run_pipeline                     # needs ANTHROPIC_API_KEY in .env; ~1-2 min
+python -m src.run_pipeline                     # needs the provider's API key in .env; ~1-2 min
 python -m src.run_pipeline --simulate-failure  # or SIMULATE_FAILURE=1
 streamlit run dashboard/app.py
 ```
@@ -32,7 +32,7 @@ Run modules from the project root (`python -m src....`), not as files. `src` is 
 - `src/tools.py`: pure parsers (`parse_price`, `parse_rating`, `parse_stock`, `parse_listing`, `parse_product`),
   `fetch()` (politeness delay and failure injection), the module-level `STATE` (`RunState`), and the 9 tools.
   `TOOLS` / `TOOLS_BY_NAME` sit at the bottom.
-- `src/agent.py`: `SYSTEM_PROMPT`, `build_graph(llm=None)` (an LLM can be injected for offline testing),
+- `src/agent.py`: `SYSTEM_PROMPT`, `get_llm()` (Claude or Gemini via `LLM_PROVIDER`), `build_graph(llm=None)` (an LLM can be injected for offline testing),
   `run_agent()`.
 - `src/run_pipeline.py`: CLI. `dashboard/app.py`: Streamlit app.
 - `tests/test_pipeline.py` plus `tests/fixtures/*.html`: trimmed real pages. Tests never hit the network.
@@ -52,7 +52,7 @@ Run modules from the project root (`python -m src....`), not as files. `src` is 
 - **The summary may only use numbers from `get_facts`.** Keep that rule in `SYSTEM_PROMPT`.
 - **Be polite:** keep tool execution sequential (custom `tool_node`, not the prebuilt parallel `ToolNode`),
   with a 0.3s delay, a timeout and a clear User-Agent.
-- **No secrets in code.** The API key comes only from `.env` (git-ignored). Update `.env.example` when adding
+- **No secrets in code.** API keys (`ANTHROPIC_API_KEY`, `GOOGLE_API_KEY`) come only from `.env` (git-ignored). Update `.env.example` when adding
   env vars.
 
 ## Testing changes without an API key
