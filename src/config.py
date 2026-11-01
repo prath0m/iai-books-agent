@@ -11,7 +11,11 @@ load_dotenv(ROOT_DIR / ".env")
 # --- LLM ---
 # Google Gemini drives the agent (free tier). Key: GOOGLE_API_KEY in .env
 MODEL = os.getenv("GOOGLE_MODEL", "gemini-3.5-flash")
-GOOGLE_REQUESTS_PER_MINUTE = float(os.getenv("GOOGLE_REQUESTS_PER_MINUTE", "4"))  # free tier limit is 5/min
+# Tried in order when a model fails (e.g. its free daily quota of ~20 requests is used up).
+# Each model has its own quota, so fallbacks multiply how many runs fit in a day.
+FALLBACK_MODELS = [m.strip() for m in os.getenv(
+    "GOOGLE_FALLBACK_MODELS", "gemini-3-flash-preview,gemini-3.5-flash-lite,gemini-3.1-flash-lite").split(",") if m.strip()]
+GOOGLE_REQUESTS_PER_MINUTE = float(os.getenv("GOOGLE_REQUESTS_PER_MINUTE", "4"))  # free tier limit is 5/min per model
 
 # --- Storage ---
 DB_PATH = ROOT_DIR / "data" / "books.db"

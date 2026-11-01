@@ -21,6 +21,10 @@ python -m src.run_pipeline --simulate-failure  # or SIMULATE_FAILURE=1
 streamlit run dashboard/app.py
 ```
 
+Hosted on Streamlit Community Cloud: secrets come from `st.secrets` (copied into env vars at the top of
+`dashboard/app.py`), and `data/books.db` is committed as a snapshot. `run_agent()` holds a lock, so only one run
+happens at a time.
+
 Run modules from the project root (`python -m src....`), not as files. `src` is imported as a package.
 
 ## Layout

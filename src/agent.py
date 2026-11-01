@@ -1,5 +1,6 @@
 """LangGraph agent: an LLM chooses every tool call; a tool node executes them and logs each one."""
 import json
+import threading
 import uuid
 from typing import Annotated, TypedDict
 
@@ -50,23 +51,31 @@ def _text_of(message: AIMessage) -> str:
     return " ".join(p.strip() for p in parts if p.strip())
 
 
-def get_llm():
-    """Gemini chat model. The free tier allows only a few requests per minute, so calls are paced
-    instead of failing with HTTP 429."""
-    limiter = InMemoryRateLimiter(requests_per_second=config.GOOGLE_REQUESTS_PER_MINUTE / 60,
-                                  check_every_n_seconds=0.5, max_bucket_size=1)
-    return ChatGoogleGenerativeAI(model=config.MODEL, temperature=0, max_tokens=4096,
-                                  timeout=60, max_retries=3, rate_limiter=limiter)
+def get_llm_with_tools():
+    """Gemini with tools bound: the main model, then each fallback model if the previous one fails.
+
+    The free tier allows only a few requests per minute per model, so each model gets its own rate
+    limiter (calls are paced instead of failing with HTTP 429). Errors such as a used-up daily quota
+    or a server timeout fall through to the next model."""
+    bound = []
+    for model in [config.MODEL] + config.FALLBACK_MODELS:
+        limiter = InMemoryRateLimiter(requests_per_second=config.GOOGLE_REQUESTS_PER_MINUTE / 60,
+                                      check_every_n_seconds=0.5, max_bucket_size=1)
+        llm = ChatGoogleGenerativeAI(model=model, temperature=0, max_tokens=4096,
+                                     timeout=45, max_retries=1, rate_limiter=limiter)
+        bound.append(llm.bind_tools(tools.TOOLS))
+    return bound[0].with_fallbacks(bound[1:]) if len(bound) > 1 else bound[0]
 
 
 def build_graph(llm=None):
     """Graph: START -> agent -> (tools -> agent)* -> END. `llm` can be injected for testing."""
-    if llm is None:
-        llm = get_llm()
-    llm_with_tools = llm.bind_tools(tools.TOOLS)
+    llm_with_tools = get_llm_with_tools() if llm is None else llm.bind_tools(tools.TOOLS)
 
     def agent_node(state: AgentState):
         response = llm_with_tools.invoke([SystemMessage(SYSTEM_PROMPT)] + state["messages"])
+        served_by = response.response_metadata.get("model_name")
+        if served_by:
+            print(f"\n[model: {served_by}]", flush=True)
         thought = _text_of(response)
         if thought:
             print(f"\n🤖 AGENT: {thought}", flush=True)
@@ -104,11 +113,24 @@ def build_graph(llm=None):
     return graph.compile()
 
 
+# Only one run at a time: tool state is shared, and a hosted dashboard can have many visitors
+_RUN_LOCK = threading.Lock()
+
+
 def run_agent(simulate_failure: bool = False, llm=None) -> dict:
     """Run one full pipeline. Returns {"run_id", "finished", "reason"}. Never raises on agent errors."""
+    if not _RUN_LOCK.acquire(blocking=False):
+        return {"run_id": None, "finished": False, "reason": "another pipeline run is already in progress"}
+    try:
+        return _run(simulate_failure, llm)
+    finally:
+        _RUN_LOCK.release()
+
+
+def _run(simulate_failure: bool, llm) -> dict:
     run_id = f"run_{tools.db.now_iso().replace(':', '').replace('-', '')[:15]}_{uuid.uuid4().hex[:6]}"
     tools.start_run(run_id, simulate_failure=simulate_failure)
-    tools.log_event("pipeline", "START", f"run_id={run_id} model={config.MODEL} simulate_failure={simulate_failure}")
+    tools.log_event("pipeline", "START", f"run_id={run_id} model={config.MODEL} fallbacks={config.FALLBACK_MODELS} simulate_failure={simulate_failure}")
 
     graph = build_graph(llm)
     try:
@@ -121,7 +143,14 @@ def run_agent(simulate_failure: bool = False, llm=None) -> dict:
         reason = f"stopped: recursion limit {config.RECURSION_LIMIT} reached"
         tools.log_event("pipeline", "ERROR", reason)
     except Exception as exc:  # e.g. API key / network problems
-        reason = f"stopped: {type(exc).__name__}: {exc}"
+        message = str(exc)
+        if "RESOURCE_EXHAUSTED" in message:
+            reason = ("stopped: Gemini free-tier quota is used up for every configured model "
+                      "(about 20 requests/day per model). Try again later or add models to GOOGLE_FALLBACK_MODELS.")
+        elif "API_KEY_INVALID" in message:
+            reason = "stopped: GOOGLE_API_KEY is not valid. Check the key in .env (or the app's Secrets when hosted)."
+        else:
+            reason = f"stopped: {type(exc).__name__}: {message[:300]}"
         tools.log_event("pipeline", "ERROR", reason)
 
     tools.log_event("pipeline", "END", reason)

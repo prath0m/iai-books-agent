@@ -77,3 +77,11 @@ def test_tools_never_raise(temp_db):
     assert tools.scrape_listing_page.invoke({"page_number": 99})["ok"] is False
     assert tools.retry_failed.invoke({"url": PAGE_URL, "strategy": "magic"})["ok"] is False
     assert tools.get_facts.invoke({})["ok"] is False
+
+
+def test_only_one_run_at_a_time():
+    # A second click while a run is in progress must not start another run
+    from src import agent
+    with agent._RUN_LOCK:
+        result = agent.run_agent()
+    assert result["run_id"] is None and result["finished"] is False

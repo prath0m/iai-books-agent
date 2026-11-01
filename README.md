@@ -23,6 +23,7 @@ cp .env.example .env               # then edit .env and set GOOGLE_API_KEY
 |---|---|---|
 | `GOOGLE_API_KEY` | (required) | Gemini key from [aistudio.google.com/apikey](https://aistudio.google.com/apikey) |
 | `GOOGLE_MODEL` | `gemini-3.5-flash` | Gemini model used by the agent |
+| `GOOGLE_FALLBACK_MODELS` | `gemini-3-flash-preview,gemini-3.5-flash-lite,gemini-3.1-flash-lite` | Tried in order if a model fails (quota used up, timeout) |
 | `GOOGLE_REQUESTS_PER_MINUTE` | `4` | Client-side pacing; the Gemini free tier allows 5 requests/min, so a run takes ~4-5 min |
 | `SIMULATE_FAILURE` | `0` | `1` = fail the first request to page 2 once |
 
@@ -47,6 +48,26 @@ get_status           OK               ... "failed_urls": {".../page-2.html": "HT
 retry_failed         RETRY            attempt 1/3 strategy=backoff url=.../page-2.html
 retry_failed         RECOVERED        .../page-2.html recovered on attempt 1 using backoff
 ```
+
+## Hosting on Streamlit Community Cloud
+
+1. Push this folder to a GitHub repository. `.env` and `.streamlit/secrets.toml` are git-ignored, so your key
+   is not pushed.
+2. At [share.streamlit.io](https://share.streamlit.io), choose **Create app** and pick the repo and branch.
+   Set **Main file path** to `dashboard/app.py`.
+3. Open **Advanced settings → Secrets** and paste the contents of `.streamlit/secrets.toml.example`
+   with your real `GOOGLE_API_KEY`.
+4. Deploy. Streamlit installs `requirements.txt` and serves the dashboard.
+
+Things to know when hosted:
+- **Shipped snapshot:** `data/books.db` is committed, so the dashboard shows data before anyone clicks Run.
+- **Temporary storage:** the cloud filesystem resets when the app restarts or redeploys, so the dashboard
+  goes back to the committed snapshot.
+- **One run at a time:** if two visitors click **Run Pipeline**, the second gets "already in progress".
+- **Shared quota:** the Gemini free tier allows about 5 requests/min and 20 requests/day *per model*. A run needs
+  about 7–10 requests, so one model covers about 2 runs a day. The fallback chain (4 models) raises that to about 8.
+  Anyone with the URL can click Run, so keep the app private (Streamlit lets you restrict viewers) if
+  that matters to you.
 
 ## Architecture
 
@@ -103,7 +124,8 @@ retry_failed         RECOVERED        .../page-2.html recovered on attempt 1 usi
 - **Gemini instead of Claude.** The spec asked for `langchain-anthropic`, but the project uses Google Gemini
   (`langchain-google-genai`) because it has a free tier. Only `get_llm()` in `src/agent.py` knows about the provider,
   so switching back means changing that one function. Calls are paced to stay under the free tier's
-  5 requests/minute.
+  5 requests/minute, and a fallback chain of Gemini models (each with its own daily quota) takes over when
+  a model's quota runs out or it times out.
 - **Grounded summary.** `get_facts` reads only from Gold, and the prompt says the summary may use only those numbers.
 
 ## Assumptions and simplifications

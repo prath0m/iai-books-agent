@@ -2,12 +2,21 @@
 
 Run with:  streamlit run dashboard/app.py
 """
+import os
 import sqlite3
 import sys
 from pathlib import Path
 
 import pandas as pd
 import streamlit as st
+
+# On Streamlit Community Cloud there is no .env: copy secrets into env vars before loading config
+try:
+    for key, value in st.secrets.items():
+        if isinstance(value, (str, int, float)):
+            os.environ.setdefault(key, str(value))
+except Exception:  # no secrets.toml locally is fine (.env is used instead)
+    pass
 
 # Make `src` importable when Streamlit runs this file directly
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
@@ -35,14 +44,13 @@ col_btn, col_chk, _ = st.columns([1, 1, 3])
 simulate = col_chk.checkbox("Simulate failure", value=config.simulate_failure_from_env(),
                             help="First request to page 2 fails once with a simulated HTTP 503")
 if col_btn.button("▶ Run Pipeline", type="primary"):
-    import os
     if not os.getenv("GOOGLE_API_KEY"):
-        st.error("GOOGLE_API_KEY is not set. Copy .env.example to .env and add your Gemini key.")
+        st.error("GOOGLE_API_KEY is not set. Add it to .env locally, or to the app's Secrets when hosted.")
     else:
         from src.agent import run_agent
-        with st.spinner("Agent is running (scraping 60 books politely takes ~1-2 minutes)..."):
+        with st.spinner("Agent is running (about 2-5 minutes on the Gemini free tier)..."):
             result = run_agent(simulate_failure=simulate)
-        (st.success if result["finished"] else st.warning)(f"{result['run_id']}: {result['reason']}")
+        (st.success if result["finished"] else st.warning)(f"{result['run_id'] or 'Not started'}: {result['reason']}")
 
 kpis = read_sql("SELECT * FROM gold_kpis")
 if kpis.empty:
