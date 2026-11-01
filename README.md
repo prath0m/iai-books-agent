@@ -25,7 +25,8 @@ cp .env.example .env               # then edit .env: pick LLM_PROVIDER and set i
 | `ANTHROPIC_API_KEY` | (if provider is anthropic) | Anthropic API key (needs paid API credits) |
 | `ANTHROPIC_MODEL` | `claude-sonnet-4-6` | Claude model used by the agent |
 | `GOOGLE_API_KEY` | (if provider is google) | Gemini key from [aistudio.google.com/apikey](https://aistudio.google.com/apikey) |
-| `GOOGLE_MODEL` | `gemini-3.8-flash` | Gemini model used by the agent |
+| `GOOGLE_MODEL` | `gemini-3.5-flash` | Gemini model used by the agent |
+| `GOOGLE_REQUESTS_PER_MINUTE` | `4` | Client-side pacing; the Gemini free tier allows 5 requests/min, so a run takes ~4-5 min |
 | `SIMULATE_FAILURE` | `0` | `1` = fail the first request to page 2 once |
 
 ## How to run

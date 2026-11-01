@@ -5,6 +5,7 @@ from typing import Annotated, TypedDict
 
 from langchain_anthropic import ChatAnthropic
 from langchain_core.messages import AIMessage, HumanMessage, SystemMessage, ToolMessage
+from langchain_core.rate_limiters import InMemoryRateLimiter
 from langgraph.errors import GraphRecursionError
 from langgraph.graph import END, START, StateGraph
 from langgraph.graph.message import add_messages
@@ -19,9 +20,10 @@ title, price, rating, category and stock, saved to Silver/Gold, plus a summary.
 
 How to work:
 1. Plan first: briefly state your plan in one or two sentences.
-2. Scrape each listing page with scrape_listing_page. It returns the product URLs on that page.
-3. Scrape every product URL with scrape_product_page to get category and stock. You may request many
-   product pages in a single turn (e.g. all 20 URLs of a page at once) - they run one after another.
+2. Scrape all listing pages with scrape_listing_page. It returns the product URLs on that page.
+3. Scrape every product URL with scrape_product_page to get category and stock.
+   Be efficient: put independent tool calls in ONE turn - all listing pages in one turn, then all
+   product URLs in one turn. They run one after another, so this is still polite.
 4. If any tool returns ok=false, call get_status, then call retry_failed for the failed URL.
    Choose the strategy yourself: try "backoff" first for timeouts / 5xx errors, and if a retry fails,
    switch to the other strategy ("alternate_user_agent"). Never retry a URL more than
@@ -30,7 +32,7 @@ How to work:
 6. Call save_clean_data (it removes invalid and duplicate rows and builds the Gold tables).
 7. Call get_facts, then write a 3-6 sentence summary and store it with save_summary.
    The summary may ONLY use numbers that appear in the get_facts result. Never invent or estimate numbers.
-8. Call finish with a short reason.
+8. Call finish with a short reason (you may call it in the same turn as save_summary).
 
 Before each tool call, write one short sentence saying why you are making it (this is logged).
 Do not re-scrape pages or products that already succeeded."""
@@ -52,7 +54,11 @@ def get_llm():
     """Chat model for the configured provider (LLM_PROVIDER in .env)."""
     if config.LLM_PROVIDER == "google":
         from langchain_google_genai import ChatGoogleGenerativeAI  # imported lazily: optional provider
-        return ChatGoogleGenerativeAI(model=config.MODEL, temperature=0, max_tokens=4096)
+        # Free tier allows only a few requests per minute, so pace calls instead of failing with 429
+        limiter = InMemoryRateLimiter(requests_per_second=config.GOOGLE_REQUESTS_PER_MINUTE / 60,
+                                      check_every_n_seconds=0.5, max_bucket_size=1)
+        return ChatGoogleGenerativeAI(model=config.MODEL, temperature=0, max_tokens=4096,
+                                      timeout=60, max_retries=3, rate_limiter=limiter)
     return ChatAnthropic(model=config.MODEL, temperature=0, max_tokens=4096)
 
 

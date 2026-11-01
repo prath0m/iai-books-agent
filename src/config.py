@@ -12,7 +12,8 @@ load_dotenv(ROOT_DIR / ".env")
 # LLM_PROVIDER picks who drives the agent: "anthropic" (default) or "google" (Gemini, has a free tier)
 LLM_PROVIDER = os.getenv("LLM_PROVIDER", "anthropic").strip().lower()
 ANTHROPIC_MODEL = os.getenv("ANTHROPIC_MODEL", "claude-sonnet-4-6")
-GOOGLE_MODEL = os.getenv("GOOGLE_MODEL", "gemini-3.8-flash")
+GOOGLE_MODEL = os.getenv("GOOGLE_MODEL", "gemini-3.5-flash")
+GOOGLE_REQUESTS_PER_MINUTE = float(os.getenv("GOOGLE_REQUESTS_PER_MINUTE", "4"))  # free tier limit is 5/min
 MODEL = GOOGLE_MODEL if LLM_PROVIDER == "google" else ANTHROPIC_MODEL
 # Env var holding the API key for the chosen provider
 API_KEY_VAR = "GOOGLE_API_KEY" if LLM_PROVIDER == "google" else "ANTHROPIC_API_KEY"
